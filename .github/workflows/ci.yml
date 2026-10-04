@@ -1,0 +1,91 @@
+name: CI
+
+# push/PR triggered: lint (luacheck + stylua) -> unit tests (busted) -> e2e (Docker)
+# E2E image: golang stage builds gRPC binaries; runtime is php:8.2-cli + APISIX (deb).
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feature-*
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (luacheck + stylua)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Lua 5.1
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: "5.1"
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v6
+      - name: Install luacheck
+        run: luarocks install luacheck 1.2.0-1
+      - name: Run stylua --check
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          version: v2.1.0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --check apisix/
+      - name: Run luacheck
+        run: luacheck apisix/
+
+  unit:
+    name: Unit Tests (busted)
+    needs: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Lua 5.1
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: "5.1"
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v6
+      - name: Install busted
+        run: luarocks install busted 2.2.0-1
+      - name: Run unit tests
+        run: busted -v t/00-unit/
+
+  e2e:
+    name: E2E Tests (Docker)
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build APISIX e2e image
+        run: docker build -t apisix-yar-grpc-plugin-e2e -f t/e2e/Dockerfile .
+
+      - name: Run e2e tests (json + msgpack, scenario 1 + 2)
+        # Mount ONLY the logs dir so failure logs survive --rm container removal.
+        # Do NOT mount the whole .run dir: it would shadow the Go binaries
+        # pre-built into the image at /app/t/e2e/.run/bin, forcing a rebuild
+        # (and Go is not installed in the runtime image).
+        run: |
+          mkdir -p t/e2e/.run/logs
+          docker run --rm -v "$PWD/t/e2e/.run/logs:/app/t/e2e/.run/logs" apisix-yar-grpc-plugin-e2e
+
+      - name: Upload logs on failure
+        if: failure()
+        id: upload-logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: t/e2e/.run/logs/
+          retention-days: 7
+          include-hidden-files: true
+
+      - name: Print logs download URL
+        if: failure()
+        run: |
+          echo "e2e logs: ${{ steps.upload-logs.outputs.artifact-url }}" >> "$GITHUB_STEP_SUMMARY"
