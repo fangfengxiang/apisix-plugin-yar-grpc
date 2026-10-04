@@ -1,0 +1,8 @@
+# StyLua configuration — matches Kong plugin code style (consistent within yar-group)
+# 4-space indent, double quotes, 120-col width, table-call without parens
+indent_type = "Spaces"
+indent_width = 4
+column_width = 120
+quote_style = "AutoPreferDouble"
+call_parentheses = "NoSingleTable"
+collapse_simple_statement = "Never"
