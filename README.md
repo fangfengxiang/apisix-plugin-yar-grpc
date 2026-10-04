@@ -162,6 +162,11 @@ work as-is. Plugin wires APISIX's phase lifecycle (`access`) to the bridge entry
 | `grpc_backend_url` | string | yar2grpc only | HTTP bridge URL of gRPC backend |
 | `yar_path_prefix` | string | no | URI prefix for service extraction (default `/api/`) |
 
+> **Note**: bridge setup state is per-worker and single-slot — one active plugin
+> config per worker process. Routing different plugin configs across routes
+> causes re-setup on every switch; use one config (or identical configs) per
+> deployment.
+
 ## Files
 
 - `apisix/plugins/yar_grpc_bridge.lua` — plugin (JSON Schema + check_schema + access)

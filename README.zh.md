@@ -162,6 +162,10 @@ APISIX 运行于 OpenResty &rarr; `ngx.*` 可用 &rarr; 桥接库 `host.lua` 抽
 | `grpc_backend_url` | string | 仅 yar2grpc | gRPC 后端的 HTTP 桥接地址 |
 | `yar_path_prefix` | string | 否 | 服务名提取的 URI 前缀（默认 `/api/`） |
 
+> **注意**：桥接 setup 状态是 worker 级单槽设计——每个 worker 进程仅支持一份
+> 生效插件配置。若多条路由配置不同插件参数，流量交替时每次切换都会触发完整
+> re-setup；同一部署请使用一份（或完全相同的）配置。
+
 ## 文件结构
 
 - `apisix/plugins/yar_grpc_bridge.lua` — 插件本体（JSON Schema + check_schema + access）

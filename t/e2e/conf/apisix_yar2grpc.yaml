@@ -11,6 +11,8 @@ routes:
             methods: ["Add", "Subtract"]
         grpc_backend_url: http://127.0.0.1:@GO_HTTP_PORT@
         yar_path_prefix: /api/
+    # dummy upstream: the plugin short-circuits via ngx.exit in access phase,
+    # so no upstream is ever contacted — it exists only to satisfy route schema.
     upstream:
       type: roundrobin
       nodes:

@@ -28,11 +28,11 @@ jobs:
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v6
       - name: Install luacheck
-        run: luarocks install luacheck
+        run: luarocks install luacheck 1.2.0-1
       - name: Run stylua --check
         uses: JohnnyMorganz/stylua-action@v4
         with:
-          version: latest
+          version: v2.1.0
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --check apisix/
       - name: Run luacheck
@@ -51,7 +51,7 @@ jobs:
       - name: Setup LuaRocks
         uses: leafo/gh-actions-luarocks@v6
       - name: Install busted
-        run: luarocks install busted
+        run: luarocks install busted 2.2.0-1
       - name: Run unit tests
         run: busted -v t/00-unit/
 
@@ -67,7 +67,10 @@ jobs:
         run: docker build -t apisix-yar-grpc-plugin-e2e -f t/e2e/Dockerfile .
 
       - name: Run e2e tests (json + msgpack, scenario 1 + 2)
-        run: docker run --rm apisix-yar-grpc-plugin-e2e
+        # Mount .run so failure logs survive --rm container removal
+        run: |
+          mkdir -p t/e2e/.run/logs
+          docker run --rm -v "$PWD/t/e2e/.run:/app/t/e2e/.run" apisix-yar-grpc-plugin-e2e
 
       - name: Upload logs on failure
         if: failure()

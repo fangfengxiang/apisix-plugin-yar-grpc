@@ -24,7 +24,8 @@ jobs:
       - name: Verify plugin version matches tag
         run: |
           TAG_VERSION="${{ steps.version.outputs.version }}"
-          PLUGIN_VERSION=$(grep '^version' apisix/plugins/yar_grpc_bridge.lua | cut -d'"' -f2)
+          PLUGIN_VERSION=$(grep -m1 'version = ' apisix/plugins/yar_grpc_bridge.lua | cut -d'"' -f2)
+          [ -n "$PLUGIN_VERSION" ] || { echo "::error::plugin version not found in yar_grpc_bridge.lua"; exit 1; }
           if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
             echo "::error::Version mismatch: tag=$TAG_VERSION plugin=$PLUGIN_VERSION"
             exit 1

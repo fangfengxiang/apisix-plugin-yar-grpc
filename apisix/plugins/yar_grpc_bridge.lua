@@ -33,10 +33,14 @@ local math_huge = math.huge
 -- Max recursion depth for table serialization / value coercion
 local MAX_SERIALIZE_DEPTH = 20
 
--- 请求体大小限制：默认 8MB / 上限 2GB (32-bit signed int max)
--- Request body size limit: default 8MB / max 2GB
+-- 请求体大小限制：默认 8MB / 硬上限 2GB (32-bit signed int max)
+-- Request body size limit: default 8MB / hard max 2GB
 local DEFAULT_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
-local MAX_MAX_PAYLOAD_BYTES = 2147483647
+local HARD_MAX_PAYLOAD_BYTES = 2147483647
+
+-- gRPC 后端 HTTP 桥接超时（yar2grpc 方向唯一出向调用，防后端挂起阻塞 worker）
+-- gRPC backend HTTP bridge timeout (yar2grpc's only outbound call)
+local GRPC_BACKEND_TIMEOUT_MS = 10000
 
 -- ── JSON Schema (APISIX plugin config) ──
 local schema = {
@@ -58,7 +62,7 @@ local schema = {
         max_payload_bytes = {
             type = "integer",
             minimum = 1,
-            maximum = MAX_MAX_PAYLOAD_BYTES,
+            maximum = HARD_MAX_PAYLOAD_BYTES,
             default = DEFAULT_MAX_PAYLOAD_BYTES,
         },
         grpc_backend_url = {
@@ -76,7 +80,7 @@ local schema = {
 local _M = {
     version = "0.1.0",
     priority = 1000,
-    name = "yar-grpc-bridge",
+    name = "yar_grpc_bridge",
     schema = schema,
 }
 
@@ -119,9 +123,10 @@ function _M.check_schema(conf)
 end
 
 -- ── Worker-level state ──
+-- 单槽设计：每 worker 仅支持一份生效配置；多路由交替不同配置会触发 re-setup。
+-- Single-slot: one active config per worker; alternating configs trigger re-setup.
 local _initialized = false
 local _config_sig = nil
-local _setup_error = nil
 
 --- Serialize a config table deterministically (sorted keys) for signature comparison.
 local function serialize_table(tbl, depth)
@@ -203,7 +208,7 @@ local function ensure_setup(conf)
             bridge.setup {
                 services = coerce_values(conf.services),
                 yar_options = conf.yar_options and coerce_values(conf.yar_options) or {},
-                max_payload_bytes = conf.max_payload_bytes,
+                max_payload_bytes = tonumber(conf.max_payload_bytes) or nil,
             }
         else
             -- yar2grpc: load .pb descriptors, clear converter caches, inject transport
@@ -256,6 +261,7 @@ local function ensure_setup(conf)
                 local http_new = require("resty.http").new
                 transport = function(service, method, frame)
                     local httpc = http_new()
+                    httpc:set_timeout(GRPC_BACKEND_TIMEOUT_MS)
                     local res, req_err = httpc:request_uri(backend_url .. "/" .. service .. "/" .. method, {
                         method = "POST",
                         body = frame,
@@ -267,11 +273,11 @@ local function ensure_setup(conf)
                     if not res then
                         return nil, errors.UNAVAILABLE, "gRPC backend error: " .. tostring(req_err)
                     end
-                    if res.status ~= 200 then
+                    if res.status ~= ngx.HTTP_OK then
                         return nil, errors.UNAVAILABLE, "gRPC backend HTTP error: " .. tostring(res.status)
                     end
-                    local grpc_status = tonumber(res.headers["grpc-status"]) or 0
-                    if grpc_status ~= 0 then
+                    local grpc_status = tonumber(res.headers["grpc-status"]) or errors.OK
+                    if grpc_status ~= errors.OK then
                         return nil, grpc_status, res.headers["grpc-message"] or "gRPC error"
                     end
                     return res.body
@@ -286,13 +292,11 @@ local function ensure_setup(conf)
     end)
 
     if not ok then
-        _setup_error = tostring(err)
-        return nil, _setup_error
+        return nil, tostring(err)
     end
 
     _initialized = true
     _config_sig = sig
-    _setup_error = nil
     return true
 end
 
@@ -302,10 +306,15 @@ end
 function _M.access(conf, ctx)
     local ok, err = ensure_setup(conf)
     if not ok then
+        -- 错误详情（含文件路径）只写日志，客户端收通用文案；必须 ngx.exit 短路，
+        -- 否则 APISIX 会继续执行后续 handler 并尝试代理到上游。
+        -- Details (may contain fs paths) go to the log only; ngx.exit short-circuits
+        -- so APISIX won't proceed to upstream proxying.
+        ngx.log(ngx.ERR, "yar_grpc_bridge plugin setup failed: ", tostring(err))
         ngx.status = ngx.HTTP_INTERNAL_SERVER_ERROR
         ngx.header["Content-Type"] = "text/plain"
-        ngx.say("yar_grpc_bridge plugin setup failed: " .. tostring(err))
-        return
+        ngx.say("yar_grpc_bridge plugin setup failed")
+        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
     end
 
     if conf.direction == "grpc2yar" then

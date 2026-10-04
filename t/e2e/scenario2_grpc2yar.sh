@@ -42,13 +42,21 @@ sed -e "s|@PHP_PORT@|${E2E_PORT_PHP}|g" \
 C "starting PHP Yar server (port ${E2E_PORT_PHP}, packager=$PACKAGER)..."
 php -d yar.packager="$PACKAGER" -S 127.0.0.1:${E2E_PORT_PHP} -t "$D/php/yar_server" >"$LOG/php_s2_${PACKAGER}.log" 2>&1 &
 echo $! > "$RUN/php_s2_${PACKAGER}.pid"
-sleep 1
 
 # ── Start APISIX (standalone, grpc2yar route) ──
 C "starting APISIX (grpc2yar, port ${E2E_PORT_APISIX_GRPC2YAR})..."
 apisix init 2>&1 | tail -1
 apisix start 2>&1 | tail -1
-sleep 2
+
+# ── Readiness probe: poll PHP server then APISIX port instead of fixed sleep ──
+for _ in $(seq 1 30); do
+    curl -s -o /dev/null "http://127.0.0.1:${E2E_PORT_PHP}/api.php" && break
+    sleep 0.5
+done
+for _ in $(seq 1 30); do
+    curl -s -o /dev/null "http://127.0.0.1:${E2E_PORT_APISIX_GRPC2YAR}/probe" && break
+    sleep 0.5
+done
 
 # ── Run Go gRPC client ──
 C "running Go gRPC client..."

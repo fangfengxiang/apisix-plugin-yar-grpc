@@ -42,13 +42,17 @@ sed -e "s|@GO_HTTP_PORT@|${E2E_PORT_GO_HTTP}|g" \
 C "starting Go gRPC server (gRPC :${E2E_PORT_GO_GRPC}, HTTP bridge :${E2E_PORT_GO_HTTP})..."
 "$BIN/grpc_server" -addr 127.0.0.1:${E2E_PORT_GO_GRPC} -http-addr 127.0.0.1:${E2E_PORT_GO_HTTP} >"$LOG/go_s1_${PACKAGER}.log" 2>&1 &
 echo $! > "$RUN/go_s1_${PACKAGER}.pid"
-sleep 1
 
 # ── Start APISIX (standalone, yar2grpc route) ──
 C "starting APISIX (yar2grpc, port ${E2E_PORT_APISIX_YAR2GRPC})..."
 apisix init 2>&1 | tail -1
 apisix start 2>&1 | tail -1
-sleep 2
+
+# ── Readiness probe: poll APISIX port instead of fixed sleep (avoids flaky CI) ──
+for _ in $(seq 1 30); do
+    curl -s -o /dev/null "http://127.0.0.1:${E2E_PORT_APISIX_YAR2GRPC}/api/probe" && break
+    sleep 0.5
+done
 
 # ── Run PHP Yar client ──
 C "running PHP Yar client (packager=$PACKAGER)..."
@@ -90,7 +94,7 @@ for i in $(seq 1 "$N_CONC"); do
         http://127.0.0.1:${E2E_PORT_APISIX_YAR2GRPC}/api/nonexistent.Service >"$LOG/s1_${PACKAGER}_conc_curl_$i.log" &
     CONC_PIDS="$CONC_PIDS $!"
 done
-wait $CONC_PIDS
+wait $CONC_PIDS || true   # 不因单个后台任务非零退出而中断，失败由下方统计判定
 
 PHP_FAIL=0; CURL_FAIL=0; CURL_BAD=""
 for i in $(seq 1 "$N_CONC"); do

@@ -7,8 +7,6 @@
 #   make docker-e2e  — end-to-end in Docker (self-contained, no local deps)
 #   make clean       — remove test artifacts
 
-ROOT := $(shell pwd)
-
 # Lua source dirs for lint (config in .luacheckrc + .stylua.toml)
 LUA_SRC := apisix/
 

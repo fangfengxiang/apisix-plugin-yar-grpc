@@ -98,6 +98,7 @@ package.loaded["yar_grpc.pb_converter"] = { clear_cache = function() end }
 package.loaded["resty.http"] = {
     new = function()
         return {
+            set_timeout = function() end,
             request_uri = function(self, url, opts)
                 return { status = 200, body = "mock-frame",
                          headers = { ["grpc-status"] = "0" } }
@@ -150,7 +151,7 @@ describe("apisix plugin yar_grpc_bridge", function()
         it("has version, priority, name, schema", function()
             assert.is_not_nil(plugin.version)
             assert.is_not_nil(plugin.priority)
-            assert.are.equal("yar-grpc-bridge", plugin.name)
+            assert.are.equal("yar_grpc_bridge", plugin.name)
             assert.is_table(plugin.schema)
         end)
 
