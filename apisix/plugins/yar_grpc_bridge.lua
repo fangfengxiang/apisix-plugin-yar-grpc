@@ -173,9 +173,7 @@ local function coerce_values(tbl, depth)
     for k, v in pairs(tbl) do
         if type(v) == "string" then
             local num = tonumber(v)
-            if num and tostring(num) == v
-               and num == num
-               and num ~= math_huge and num ~= -math_huge then
+            if num and tostring(num) == v and num == num and num ~= math_huge and num ~= -math_huge then
                 result[k] = num
             elseif v == "true" then
                 result[k] = true
@@ -224,8 +222,10 @@ local function ensure_setup(conf)
                 if proto_file and not loaded_files[proto_file] then
                     local f, ferr = io.open(proto_file, "rb")
                     if not f then
-                        error("yar_grpc_bridge: cannot open proto file: " .. proto_file
-                            .. " (" .. tostring(ferr) .. ")", 0)
+                        error(
+                            "yar_grpc_bridge: cannot open proto file: " .. proto_file .. " (" .. tostring(ferr) .. ")",
+                            0
+                        )
                     end
                     local data = f:read("*a")
                     f:close()
@@ -234,12 +234,17 @@ local function ensure_setup(conf)
                     end
                     local pok, res, offset = pcall(pb.load, data)
                     if not pok then
-                        error("yar_grpc_bridge: failed to load " .. proto_file .. ": "
-                            .. tostring(res), 0)
+                        error("yar_grpc_bridge: failed to load " .. proto_file .. ": " .. tostring(res), 0)
                     end
                     if res == false then
-                        error("yar_grpc_bridge: invalid .pb descriptor " .. proto_file
-                            .. " (parse error at offset " .. tostring(offset) .. ")", 0)
+                        error(
+                            "yar_grpc_bridge: invalid .pb descriptor "
+                                .. proto_file
+                                .. " (parse error at offset "
+                                .. tostring(offset)
+                                .. ")",
+                            0
+                        )
                     end
                     loaded_files[proto_file] = true
                 end
@@ -251,29 +256,23 @@ local function ensure_setup(conf)
                 local http_new = require("resty.http").new
                 transport = function(service, method, frame)
                     local httpc = http_new()
-                    local res, req_err = httpc:request_uri(
-                        backend_url .. "/" .. service .. "/" .. method,
-                        {
-                            method = "POST",
-                            body = frame,
-                            headers = {
-                                ["Content-Type"] = "application/grpc",
-                                ["TE"] = "trailers",
-                            },
-                        }
-                    )
+                    local res, req_err = httpc:request_uri(backend_url .. "/" .. service .. "/" .. method, {
+                        method = "POST",
+                        body = frame,
+                        headers = {
+                            ["Content-Type"] = "application/grpc",
+                            ["TE"] = "trailers",
+                        },
+                    })
                     if not res then
-                        return nil, errors.UNAVAILABLE,
-                            "gRPC backend error: " .. tostring(req_err)
+                        return nil, errors.UNAVAILABLE, "gRPC backend error: " .. tostring(req_err)
                     end
                     if res.status ~= 200 then
-                        return nil, errors.UNAVAILABLE,
-                            "gRPC backend HTTP error: " .. tostring(res.status)
+                        return nil, errors.UNAVAILABLE, "gRPC backend HTTP error: " .. tostring(res.status)
                     end
                     local grpc_status = tonumber(res.headers["grpc-status"]) or 0
                     if grpc_status ~= 0 then
-                        return nil, grpc_status,
-                            res.headers["grpc-message"] or "gRPC error"
+                        return nil, grpc_status, res.headers["grpc-message"] or "gRPC error"
                     end
                     return res.body
                 end

@@ -20,7 +20,7 @@ description = {
 }
 
 dependencies = {
-    "lua-resty-yar-grpc-bridge",
+    "lua-resty-yar-grpc-bridge >= 0.1.2",
     "lua-resty-http",
 }
 

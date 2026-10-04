@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # GitHub Actions version updates
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
+  # Go module updates (e2e test Go gRPC server/client)
+  - package-ecosystem: gomod
+    directory: /t/e2e/go
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

@@ -1,0 +1,113 @@
+name: CI
+
+# push/PR triggered: lint (luacheck + stylua) -> unit tests (busted) -> e2e (Docker)
+# Pipeline adapted from kong-plugin-yar-grpc CI + APISIX plugin characteristics:
+#   - APISIX plugins are Lua modules loaded by APISIX Gateway at runtime
+#   - Unit tests use busted with mocked ngx/bridge (no APISIX binary needed)
+#   - E2e tests use Docker (OpenResty + PHP Yar + Go gRPC, fully self-contained)
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feature-*
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  # Same branch push + PR reuse one group; PR cancels in-progress push run
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Lua static analysis + format check (fast feedback) ──
+  # luacheck: undefined globals, unused vars, etc. (apisix/ plugin source)
+  # stylua --check: format consistency (report only, no modification)
+  lint:
+    name: Lint (luacheck + stylua)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Lua 5.1
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: "5.1"
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v6
+      - name: Install luacheck
+        run: luarocks install luacheck
+      - name: Run stylua --check
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          version: latest
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --check apisix/
+      - name: Run luacheck
+        run: luacheck apisix/
+
+  # ── Unit tests (busted BDD, mocked ngx/bridge) ──
+  # plugin_spec.lua mocks ngx.*, bridge modules — no OpenResty/APISIX binary needed.
+  # busted with mocks tests plugin logic in isolation (schema, config signature,
+  # coercion, URI routing, error paths).
+  unit:
+    name: Unit Tests (busted)
+    needs: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Lua 5.1
+        uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: "5.1"
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v6
+      - name: Install busted + luassert
+        run: luarocks install busted
+      - name: Run unit tests
+        run: busted -v t/00-unit/
+
+  # ── E2E tests (Docker: APISIX plugin + PHP Yar + Go gRPC, both directions) ──
+  # Builds bridge base image from GitHub (cached), then APISIX plugin image on top.
+  # Scenario 1: PHP Yar -> APISIX (yar2grpc) -> Go gRPC
+  # Scenario 2: Go gRPC -> APISIX (grpc2yar) -> PHP Yar
+  # Both scenarios run with json + msgpack packagers.
+  e2e:
+    name: E2E Tests (Docker)
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bridge e2e base image
+        run: |
+          tmpdir=$(mktemp -d)
+          git clone --branch v0.1.1 --depth 1 \
+            https://github.com/fangfengxiang/lua-resty-yar-grpc-bridge.git "$tmpdir/bridge"
+          docker build -t yar-grpc-bridge-e2e \
+            -f "$tmpdir/bridge/t/e2e/Dockerfile" "$tmpdir/bridge/t/e2e/"
+          rm -rf "$tmpdir"
+
+      - name: Build APISIX plugin e2e image
+        run: docker build -t apisix-yar-grpc-plugin-e2e -f t/e2e/Dockerfile t/e2e/
+
+      - name: Run e2e tests (json + msgpack, scenario 1 + 2)
+        run: |
+          docker run --rm -v "$(pwd):/app" -w /app \
+            apisix-yar-grpc-plugin-e2e bash t/e2e/run_e2e.sh
+
+      - name: Upload logs on failure
+        if: failure()
+        id: upload-logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: t/e2e/.run/logs/
+          retention-days: 7
+          include-hidden-files: true
+
+      - name: Print logs download URL
+        if: failure()
+        run: |
+          echo "e2e logs: ${{ steps.upload-logs.outputs.artifact-url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "e2e logs artifact: ${{ steps.upload-logs.outputs.artifact-url }}"
