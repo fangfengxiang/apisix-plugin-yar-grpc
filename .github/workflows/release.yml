@@ -2,6 +2,7 @@ name: Release
 
 # Triggered when a version tag (v*) is pushed.
 # Convention: tag name = v<version>, e.g. v0.1.0, v0.2.0-rc1
+# Version source of truth: the `version` field in apisix/plugins/yar_grpc_bridge.lua
 on:
   push:
     tags:
@@ -20,30 +21,15 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      - name: Verify rockspec version matches tag
+      - name: Verify plugin version matches tag
         run: |
           TAG_VERSION="${{ steps.version.outputs.version }}"
-          ROCKSPEC=$(ls *.rockspec | head -1)
-          ROCKSPEC_VERSION=$(grep '^version' "$ROCKSPEC" | cut -d'"' -f2 | sed 's/-[0-9]*$//')
-          if [ "$TAG_VERSION" != "$ROCKSPEC_VERSION" ]; then
-            echo "::error::Version mismatch: tag=$TAG_VERSION rockspec=$ROCKSPEC_VERSION"
+          PLUGIN_VERSION=$(grep '^version' apisix/plugins/yar_grpc_bridge.lua | cut -d'"' -f2)
+          if [ "$TAG_VERSION" != "$PLUGIN_VERSION" ]; then
+            echo "::error::Version mismatch: tag=$TAG_VERSION plugin=$PLUGIN_VERSION"
             exit 1
           fi
           echo "Version match OK: $TAG_VERSION"
-
-      - name: Setup Lua 5.1 + LuaRocks
-        uses: leafo/gh-actions-lua@v13
-        with:
-          luaVersion: "5.1"
-      - uses: leafo/gh-actions-luarocks@v6
-
-      - name: Build LuaRocks package
-        run: |
-          ROCKSPEC=$(ls *.rockspec | head -1)
-          luarocks pack "$ROCKSPEC"
-          PKG=$(ls *.src.rock | head -1)
-          echo "pkg=$PKG" >> $GITHUB_OUTPUT
-        id: pack
 
       - name: Create source tarball
         run: |
@@ -61,42 +47,12 @@ jobs:
 
             ## Installation
 
-            ```bash
-            # install the plugin (pulls bridge + lua-resty-http as deps)
-            luarocks install apisix-plugin-yar-grpc
-            ```
+            Copy `apisix/plugins/yar_grpc_bridge.lua` to your APISIX deployment
+            and configure `extra_lua_path` + `plugins` in `config.yaml`.
+            See [README](https://github.com/fangfengxiang/apisix-plugin-yar-grpc#readme).
 
             Dependencies: [lua-resty-yar-grpc-bridge](https://github.com/fangfengxiang/lua-resty-yar-grpc-bridge) >= 0.1.2, [lua-resty-http](https://github.com/ledgetech/lua-resty-http).
-
-            ## Documentation
-
-            - [README](https://github.com/fangfengxiang/apisix-plugin-yar-grpc#readme)
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             apisix-plugin-yar-grpc-${{ steps.version.outputs.version }}.tar.gz
-            ${{ steps.pack.outputs.pkg }}
-
-  # ── Publish to LuaRocks ──
-  # Independent job with deploy approval gate (GitHub UI Review deployments → Approve).
-  # Credentials: LUAROCKS_API_KEY (secret). Upload gated by vars.LUAROCKS_API_KEY
-  # (repository variable — visible in if conditions, acts as publish-enable flag).
-  # If vars.LUAROCKS_API_KEY not set: build still runs, upload skipped.
-  luarocks:
-    needs: release
-    environment: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: leafo/gh-actions-lua@v13
-        with:
-          luaVersion: "5.1"
-      - uses: leafo/gh-actions-luarocks@v6
-
-      - name: Upload to LuaRocks
-        if: ${{ vars.LUAROCKS_API_KEY != '' }}
-        env:
-          LUAROCKS_API_KEY: ${{ secrets.LUAROCKS_API_KEY }}
-        run: |
-          ROCKSPEC=$(ls *.rockspec | head -1)
-          luarocks upload "$ROCKSPEC" --api-key="$LUAROCKS_API_KEY"

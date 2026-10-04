@@ -1,0 +1,18 @@
+# apisix_yar2grpc.yaml — Scenario 1 routes: PHP Yar → APISIX (yar2grpc) → Go gRPC
+routes:
+  - id: yar2grpc
+    uri: /api/*
+    plugins:
+      yar_grpc_bridge:
+        direction: yar2grpc
+        services:
+          calculator.Calculator:
+            proto: /app/t/e2e/proto/calculator.pb
+            methods: ["Add", "Subtract"]
+        grpc_backend_url: http://127.0.0.1:@GO_HTTP_PORT@
+        yar_path_prefix: /api/
+    upstream:
+      type: roundrobin
+      nodes:
+        127.0.0.1:9999: 1
+#END

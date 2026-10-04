@@ -5,8 +5,7 @@
 APISIX custom plugin: YAR ↔ gRPC protocol bridge for Apache APISIX.
 
 Reuses the host-agnostic orchestration + OpenResty HTTP entry from
-[`lua-resty-yar-grpc-bridge`](../lua-resty-yar-grpc-bridge) (overview-5 职责拆分后，
-编排层 `grpc2yar.handle` / `yar2grpc._dispatch` 与 HTTP 入口层已分离)。
+[`lua-resty-yar-grpc-bridge`](../lua-resty-yar-grpc-bridge).
 
 ## Architecture
 
@@ -20,56 +19,58 @@ PHP Yar client ──HTTP/1.1──► APISIX (plugin:access) ──► yar2grpc
                                                            └─► grpc_transport ──► Go gRPC Server
 ```
 
-APISIX runs on OpenResty → `ngx.*` available → bridge entry modules work as-is.
-Plugin wires APISIX's phase lifecycle (access) to the bridge endpoint modules.
-
 ## Installation
 
-### Prerequisites
+APISIX loads custom plugins via `extra_lua_path` + `plugins` list (no LuaRocks
+integration). The plugin is a single `.lua` file — copy it into your deployment
+and point APISIX at it.
 
-- [Apache APISIX](https://apisix.apache.org/) 3.x running on OpenResty
-- [LuaRocks](https://luarocks.org/) (bundled with OpenResty)
-
-### Install the plugin
+### 1. Copy the plugin source
 
 ```bash
-luarocks install apisix-plugin-yar-grpc
+# Clone or download this repo
+git clone https://github.com/fangfengxiang/apisix-plugin-yar-grpc.git
 ```
 
-This pulls `lua-resty-yar-grpc-bridge` (>= 0.1.2) and `lua-resty-http` as dependencies.
+### 2. Install bridge dependencies
 
-### Enable in APISIX
+```bash
+luarocks install lua-resty-yar-grpc-bridge >= 0.1.2
+luarocks install lua-resty-http
+```
 
-Add the plugin to `conf/config.yaml`:
+### 3. Configure APISIX
+
+Add to `conf/config.yaml`:
 
 ```yaml
 apisix:
-    extra_lua_path: "/usr/local/share/lua/5.1/?.lua"   # LuaRocks install path
+    extra_lua_path: "/path/to/apisix-plugin-yar-grpc/?.lua"
 
 plugins:                # ⚠️ defining plugins replaces the default list
     - router-defense   # keep built-in plugins you need
     - yar_grpc_bridge  # add this plugin
 ```
 
-> If APISIX is installed via LuaRocks (same prefix), the plugin is already in
-> APISIX's default `lua_package_path` — `extra_lua_path` is not needed.
+The `extra_lua_path` must point to the **repo root** so that
+`require("apisix.plugins.yar_grpc_bridge")` resolves to
+`<repo>/apisix/plugins/yar_grpc_bridge.lua`.
 
 ### Docker / Kubernetes
 
-For the APISIX Docker image, build a custom image:
-
 ```dockerfile
-FROM apache/apisix
-RUN luarocks install apisix-plugin-yar-grpc
+FROM apache/apisix:3.11.0
+COPY apisix-plugin-yar-grpc/apisix/plugins/yar_grpc_bridge.lua /opt/apisix/plugins/yar_grpc_bridge.lua
+RUN luarocks install lua-resty-yar-grpc-bridge 0.1.2 && \
+    luarocks install lua-resty-http
 ```
 
-For Helm, set `extraLuaPath` and `plugins` in `values.yaml`:
-
 ```yaml
+# config.yaml
 apisix:
-    extraLuaPath: "/usr/local/share/lua/5.1/?.lua"
-    plugins:
-        - yar_grpc_bridge
+    extra_lua_path: "/opt/?.lua"
+plugins:
+    - yar_grpc_bridge
 ```
 
 ## Config schema
@@ -104,7 +105,7 @@ apisix:
 
 - `apisix/plugins/yar_grpc_bridge.lua` — plugin (JSON Schema + check_schema + access)
 - `t/00-unit/` — BDD unit tests (busted)
-- `t/e2e/` — e2e tests (Docker: OpenResty + PHP Yar + Go gRPC)
+- `t/e2e/` — e2e tests (Docker: APISIX + PHP Yar + Go gRPC)
 
 ## Development
 
@@ -115,25 +116,17 @@ make lint
 # unit tests (busted, mocked — no APISIX binary needed)
 make test
 
-# e2e (local: requires OpenResty + PHP Yar + Go + protoc)
+# e2e (local: requires APISIX + PHP + Go + protoc)
 make e2e
 
 # e2e (Docker: self-contained, no local deps)
 make docker-e2e
 
-# clean test artifacts + nginx temp dirs
+# clean test artifacts
 make clean
 
 # show all targets
 make help
-```
-
-Local e2e prerequisites: the bridge must be findable via `lua_package_path`.
-`run_e2e.sh` auto-detects the sibling dir `../lua-resty-yar-grpc-bridge/lib`;
-alternatively install the bridge via LuaRocks:
-
-```bash
-luarocks install lua-resty-yar-grpc-bridge
 ```
 
 ## Differences from kong-plugin-yar-grpc
@@ -155,11 +148,8 @@ Three-stage pipeline (`.github/workflows/ci.yml`): `lint → unit → e2e`.
 
 - **lint**: `luacheck` + `stylua --check` on `apisix/`
 - **unit**: `busted -v t/00-unit/` (mocked ngx/bridge, no binary)
-- **e2e**: Docker image built from bridge base + plugin Dockerfile; runs both
+- **e2e**: Docker image built from `apache/apisix` base; runs both
   scenarios (grpc2yar / yar2grpc) with both packagers (json / msgpack)
-
-Releases (`.github/workflows/release.yml`): push a `v*` tag → version-verified
-LuaRocks `.src.rock` + source tarball + GitHub Release; optional LuaRocks upload.
 
 ## License
 
