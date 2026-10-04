@@ -1,0 +1,9 @@
+# e2e test runtime artifacts
+t/e2e/.run/
+
+# Lua/JIT compiled
+*.ljbc
+
+# OS
+.DS_Store
+Thumbs.db
