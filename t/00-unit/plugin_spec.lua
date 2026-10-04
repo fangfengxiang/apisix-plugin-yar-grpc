@@ -5,6 +5,14 @@
 -- config change detection, transport injection) using mocks — no real network
 -- or nginx needed.
 
+--- Check if a value exists in a list (array-like table).
+local function contains_value(list, value)
+    for _, v in ipairs(list) do
+        if v == value then return true end
+    end
+    return false
+end
+
 -- ── Mock setup (must be before require handler) ──
 
 -- Save original ngx
@@ -150,8 +158,8 @@ describe("apisix plugin yar_grpc_bridge", function()
             assert.are.equal("object", plugin.schema.type)
             assert.is_table(plugin.schema.properties)
             assert.is_table(plugin.schema.required)
-            assert.truthy(vim_in_list(plugin.schema.required, "direction"))
-            assert.truthy(vim_in_list(plugin.schema.required, "services"))
+            assert.truthy(contains_value(plugin.schema.required, "direction"))
+            assert.truthy(contains_value(plugin.schema.required, "services"))
         end)
     end)
 
@@ -225,7 +233,7 @@ describe("apisix plugin yar_grpc_bridge", function()
             direction = "grpc2yar",
             services = {
                 ["calculator.Calculator"] = {
-                    proto = "/etc/kong/proto/calc.pb",
+                    proto = "/etc/apisix/proto/calc.pb",
                     url = "http://php:8888/api.php",
                     options = { packager = "json", timeout = "5000" },
                 },
@@ -263,7 +271,7 @@ describe("apisix plugin yar_grpc_bridge", function()
             direction = "yar2grpc",
             services = {
                 ["calculator.Calculator"] = {
-                    proto = "/etc/kong/proto/calc.pb",
+                    proto = "/etc/apisix/proto/calc.pb",
                     methods = { "Add", "Subtract" },
                 },
             },
@@ -396,12 +404,112 @@ describe("apisix plugin yar_grpc_bridge", function()
             assert.is_nil(code)
         end)
     end)
-end)
 
--- Helper function
-function vim_in_list(list, value)
-    for _, v in ipairs(list) do
-        if v == value then return true end
-    end
-    return false
-end
+    describe("check_schema conditional validation", function()
+        it("rejects empty services table", function()
+            local ok, err = plugin.check_schema({
+                direction = "grpc2yar",
+                services = {},
+            })
+            assert.is_false(ok)
+            assert.is_string(err)
+        end)
+
+        it("requires grpc_backend_url for yar2grpc direction", function()
+            local ok, err = plugin.check_schema({
+                direction = "yar2grpc",
+                services = {
+                    ["test"] = { proto = "/x.pb", methods = { "Add" } },
+                },
+            })
+            assert.is_false(ok)
+            assert.is_string(err)
+        end)
+
+        it("rejects empty grpc_backend_url for yar2grpc", function()
+            local ok, err = plugin.check_schema({
+                direction = "yar2grpc",
+                services = { ["test"] = { proto = "/x.pb" } },
+                grpc_backend_url = "",
+            })
+            assert.is_false(ok)
+            assert.is_string(err)
+        end)
+
+        it("does not require grpc_backend_url for grpc2yar", function()
+            local ok, err = plugin.check_schema({
+                direction = "grpc2yar",
+                services = { ["test"] = { proto = "/x.pb", url = "http://x" } },
+            })
+            assert.is_true(ok)
+            assert.is_nil(err)
+        end)
+    end)
+
+    describe("ensure_setup error paths", function()
+        local base_conf = {
+            direction = "yar2grpc",
+            services = {
+                ["calculator.Calculator"] = {
+                    proto = "/missing.proto",
+                    methods = { "Add" },
+                },
+            },
+            grpc_backend_url = "http://go-grpc:50052",
+        }
+
+        it("returns 500 when proto file does not exist", function()
+            -- Restore real io.open so /missing.proto fails to open
+            io.open = real_io_open
+            mock_ngx.status = nil
+            plugin.access(base_conf, {})
+            assert.are.equal(mock_ngx.HTTP_INTERNAL_SERVER_ERROR, mock_ngx.status)
+        end)
+
+        it("returns 500 when proto file is empty", function()
+            io.open = function(path, mode)
+                if path and path:match("%.proto$") then
+                    return { read = function() return "" end, close = function() end }
+                end
+                return real_io_open(path, mode)
+            end
+            mock_ngx.status = nil
+            plugin.access(base_conf, {})
+            assert.are.equal(mock_ngx.HTTP_INTERNAL_SERVER_ERROR, mock_ngx.status)
+        end)
+
+        it("returns 500 when pb.load fails", function()
+            io.open = function(path, mode)
+                if path and path:match("%.proto$") then
+                    return { read = function() return "garbage" end, close = function() end }
+                end
+                return real_io_open(path, mode)
+            end
+            package.loaded["pb"] = { load = function() return false, 0 end }
+            mock_ngx.status = nil
+            plugin.access(base_conf, {})
+            assert.are.equal(mock_ngx.HTTP_INTERNAL_SERVER_ERROR, mock_ngx.status)
+            -- restore mock pb
+            package.loaded["pb"] = { load = function() return true end }
+        end)
+
+        it("retries setup after a failure (not cached as initialized)", function()
+            -- First: fail (pb.load returns false)
+            io.open = function(path, mode)
+                if path and path:match("%.proto$") then
+                    return { read = function() return "x" end, close = function() end }
+                end
+                return real_io_open(path, mode)
+            end
+            package.loaded["pb"] = { load = function() return false, 0 end }
+            plugin.access(base_conf, {})
+            assert.are.equal(mock_ngx.HTTP_INTERNAL_SERVER_ERROR, mock_ngx.status)
+            -- Second: succeed (pb.load returns true) — setup should re-run
+            package.loaded["pb"] = { load = function() return true end }
+            mock_ngx.status = nil
+            plugin.access(base_conf, {})
+            assert.is_nil(mock_ngx.status) -- no 500 on success
+            assert.is_true(yar2grpc_setup_called)
+        end)
+    end)
+end)

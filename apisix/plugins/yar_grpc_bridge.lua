@@ -24,9 +24,19 @@ local tostring = tostring
 local tonumber = tonumber
 local pairs = pairs
 local ipairs = ipairs
+local next = next
 local table_sort = table.sort
 local table_concat = table.concat
 local math_huge = math.huge
+
+-- 递归序列化 / 类型转换的最大深度上限
+-- Max recursion depth for table serialization / value coercion
+local MAX_SERIALIZE_DEPTH = 20
+
+-- 请求体大小限制：默认 8MB / 上限 2GB (32-bit signed int max)
+-- Request body size limit: default 8MB / max 2GB
+local DEFAULT_MAX_PAYLOAD_BYTES = 8 * 1024 * 1024
+local MAX_MAX_PAYLOAD_BYTES = 2147483647
 
 -- ── JSON Schema (APISIX plugin config) ──
 local schema = {
@@ -48,8 +58,8 @@ local schema = {
         max_payload_bytes = {
             type = "integer",
             minimum = 1,
-            maximum = 2147483647,
-            default = 8388608,
+            maximum = MAX_MAX_PAYLOAD_BYTES,
+            default = DEFAULT_MAX_PAYLOAD_BYTES,
         },
         grpc_backend_url = {
             type = "string",
@@ -64,7 +74,7 @@ local schema = {
 }
 
 local _M = {
-    version = 0.1,
+    version = "0.1.0",
     priority = 1000,
     name = "yar-grpc-bridge",
     schema = schema,
@@ -86,6 +96,16 @@ function _M.check_schema(conf)
     if type(conf.services) ~= "table" then
         return false, "services is required and must be a table"
     end
+    if next(conf.services) == nil then
+        return false, "services must not be empty"
+    end
+    -- yar2grpc 方向必须配置 grpc_backend_url
+    -- grpc_backend_url is required for yar2grpc direction
+    if conf.direction == "yar2grpc" then
+        if type(conf.grpc_backend_url) ~= "string" or conf.grpc_backend_url == "" then
+            return false, "grpc_backend_url is required for yar2grpc direction"
+        end
+    end
     -- Verify each service has at least proto
     for name, svc in pairs(conf.services) do
         if type(svc) ~= "table" then
@@ -106,7 +126,7 @@ local _setup_error = nil
 --- Serialize a config table deterministically (sorted keys) for signature comparison.
 local function serialize_table(tbl, depth)
     depth = depth or 0
-    if depth > 20 or type(tbl) ~= "table" then
+    if depth > MAX_SERIALIZE_DEPTH or type(tbl) ~= "table" then
         return tostring(tbl)
     end
     local parts = {}
@@ -146,7 +166,7 @@ end
 -- APISIX config delivery (etcd/admin API) may deliver numbers as strings.
 local function coerce_values(tbl, depth)
     depth = depth or 0
-    if depth > 20 or type(tbl) ~= "table" then
+    if depth > MAX_SERIALIZE_DEPTH or type(tbl) ~= "table" then
         return tbl
     end
     local result = {}

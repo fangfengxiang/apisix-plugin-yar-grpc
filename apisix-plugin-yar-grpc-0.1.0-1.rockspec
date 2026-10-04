@@ -2,7 +2,7 @@ package = "apisix-plugin-yar-grpc"
 version = "0.1.0-1"
 
 source = {
-    url = "git://github.com/fangfengxiang/apisix-plugin-yar-grpc",
+    url = "https://github.com/fangfengxiang/apisix-plugin-yar-grpc.git",
     branch = "main",
 }
 
