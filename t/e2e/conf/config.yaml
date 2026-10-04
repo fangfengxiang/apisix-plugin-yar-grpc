@@ -1,0 +1,22 @@
+# config.yaml — APISIX standalone mode configuration template
+# Placeholders (@PORT@, @HTTP2@) are substituted by scenario scripts.
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  extra_lua_path: "/app/?.lua"
+  enable_http2: @HTTP2@
+  node_listen: @PORT@
+
+plugins:
+  - yar_grpc_bridge
+
+nginx_config:
+  http_server_configuration_snippet: |
+    set $service_name "";
+    set $grpc_status "0";
+    set $grpc_message "";
+    add_trailer grpc-status $grpc_status always;
+    add_trailer grpc-message $grpc_message always;

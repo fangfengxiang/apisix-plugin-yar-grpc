@@ -1,0 +1,24 @@
+# apisix_grpc2yar.yaml — Scenario 2 routes: Go gRPC → APISIX (grpc2yar) → PHP Yar
+routes:
+  - id: grpc2yar
+    uri: /calculator.Calculator/*
+    plugins:
+      yar_grpc_bridge:
+        direction: grpc2yar
+        services:
+          calculator.Calculator:
+            proto: /app/t/e2e/proto/calculator.pb
+            url: http://127.0.0.1:@PHP_PORT@/api.php
+            options:
+              packager: "@PACKAGER@"
+              timeout: "5000"
+        yar_options:
+          timeout: "3000"
+        max_payload_bytes: 8388608
+    # dummy upstream: the plugin short-circuits via ngx.exit in access phase,
+    # so no upstream is ever contacted — it exists only to satisfy route schema.
+    upstream:
+      type: roundrobin
+      nodes:
+        127.0.0.1:9999: 1
+#END
