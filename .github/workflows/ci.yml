@@ -30,7 +30,7 @@ jobs:
       - name: Install luacheck
         run: luarocks install luacheck 1.2.0-1
       - name: Run stylua --check
-        uses: JohnnyMorganz/stylua-action@v4
+        uses: JohnnyMorganz/stylua-action@v5
         with:
           version: v2.1.0
           token: ${{ secrets.GITHUB_TOKEN }}
