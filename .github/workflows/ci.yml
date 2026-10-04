@@ -20,7 +20,7 @@ jobs:
     name: Lint (luacheck + stylua)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Lua 5.1
         uses: leafo/gh-actions-lua@v13
         with:
@@ -43,7 +43,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Lua 5.1
         uses: leafo/gh-actions-lua@v13
         with:
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build APISIX e2e image
         run: docker build -t apisix-yar-grpc-plugin-e2e -f t/e2e/Dockerfile .
